@@ -45,11 +45,23 @@ async function authFetch(path: string, options: RequestInit = {}) {
   return res;
 }
 
-export async function verifyCode(code: string): Promise<{ token: string; user: UserProfile }> {
+export async function registerUser(login: string, password: string, name: string): Promise<{ token: string; user: UserProfile }> {
   const res = await fetch(AUTH_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "verify", code }),
+    body: JSON.stringify({ action: "register", login, password, name }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Ошибка регистрации");
+  setToken(data.token);
+  return data;
+}
+
+export async function loginUser(login: string, password: string): Promise<{ token: string; user: UserProfile }> {
+  const res = await fetch(AUTH_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "login", login, password }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Ошибка входа");

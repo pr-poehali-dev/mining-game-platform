@@ -1,6 +1,7 @@
 import os
 import json
 import secrets
+import hashlib
 import psycopg2
 
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p72360393_mining_game_platform")
@@ -10,8 +11,12 @@ def get_db():
     return psycopg2.connect(os.environ["DATABASE_URL"])
 
 
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
 def handler(event: dict, context) -> dict:
-    """Auth API: верификация кода из Telegram, выдача токена, профиль, баланс, история."""
+    """Auth API: регистрация и вход по логину/паролю, профиль, баланс, история."""
 
     cors = {
         "Access-Control-Allow-Origin": "*",
@@ -46,14 +51,14 @@ def handler(event: dict, context) -> dict:
         )
         return cur.fetchone()
 
-    # GET без action — вернуть профиль
+    # GET без action — профиль
     if method == "GET" and not action:
         if not token:
             return {"statusCode": 401, "headers": cors, "body": json.dumps({"error": "no token"})}
         conn = get_db()
         cur = conn.cursor()
         cur.execute(
-            f"SELECT u.id, u.tg_id, u.name, u.tg_username, u.balance "
+            f"SELECT u.id, u.login, u.name, u.balance "
             f"FROM {SCHEMA}.sessions s JOIN {SCHEMA}.users u ON u.id = s.user_id "
             f"WHERE s.token = %s AND s.expires_at > NOW()",
             (token,)
@@ -63,7 +68,68 @@ def handler(event: dict, context) -> dict:
         if not row:
             return {"statusCode": 401, "headers": cors, "body": json.dumps({"error": "invalid token"})}
         return {"statusCode": 200, "headers": cors, "body": json.dumps({
-            "id": row[0], "tg_id": row[1], "name": row[2], "tg_username": row[3], "balance": float(row[4])
+            "id": row[0], "tg_id": 0, "name": row[2], "tg_username": row[1], "balance": float(row[3])
+        })}
+
+    # POST action=register
+    if action == "register":
+        login = body.get("login", "").strip().lower()
+        password = body.get("password", "").strip()
+        name = body.get("name", "").strip()
+        if not login or not password or not name:
+            return {"statusCode": 400, "headers": cors, "body": json.dumps({"error": "Заполните все поля"})}
+        if len(login) < 3:
+            return {"statusCode": 400, "headers": cors, "body": json.dumps({"error": "Логин минимум 3 символа"})}
+        if len(password) < 6:
+            return {"statusCode": 400, "headers": cors, "body": json.dumps({"error": "Пароль минимум 6 символов"})}
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(f"SELECT id FROM {SCHEMA}.users WHERE login = %s", (login,))
+        if cur.fetchone():
+            conn.close()
+            return {"statusCode": 400, "headers": cors, "body": json.dumps({"error": "Логин уже занят"})}
+        pw_hash = hash_password(password)
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.users (tg_id, name, login, password_hash) "
+            f"VALUES (%s, %s, %s, %s) RETURNING id, balance",
+            (0, name, login, pw_hash)
+        )
+        user_row = cur.fetchone()
+        user_id, balance = user_row
+        new_token = secrets.token_urlsafe(32)
+        cur.execute(f"INSERT INTO {SCHEMA}.sessions (user_id, token) VALUES (%s, %s)", (user_id, new_token))
+        conn.commit()
+        conn.close()
+        return {"statusCode": 200, "headers": cors, "body": json.dumps({
+            "token": new_token,
+            "user": {"id": user_id, "tg_id": 0, "name": name, "tg_username": login, "balance": float(balance)}
+        })}
+
+    # POST action=login
+    if action == "login":
+        login = body.get("login", "").strip().lower()
+        password = body.get("password", "").strip()
+        if not login or not password:
+            return {"statusCode": 400, "headers": cors, "body": json.dumps({"error": "Введите логин и пароль"})}
+        conn = get_db()
+        cur = conn.cursor()
+        pw_hash = hash_password(password)
+        cur.execute(
+            f"SELECT id, name, balance FROM {SCHEMA}.users WHERE login = %s AND password_hash = %s",
+            (login, pw_hash)
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return {"statusCode": 400, "headers": cors, "body": json.dumps({"error": "Неверный логин или пароль"})}
+        user_id, name, balance = row
+        new_token = secrets.token_urlsafe(32)
+        cur.execute(f"INSERT INTO {SCHEMA}.sessions (user_id, token) VALUES (%s, %s)", (user_id, new_token))
+        conn.commit()
+        conn.close()
+        return {"statusCode": 200, "headers": cors, "body": json.dumps({
+            "token": new_token,
+            "user": {"id": user_id, "tg_id": 0, "name": name, "tg_username": login, "balance": float(balance)}
         })}
 
     # GET action=history
@@ -87,42 +153,6 @@ def handler(event: dict, context) -> dict:
         history = [{"id": r[0], "type": r[1], "label": r[2], "amount": float(r[3]),
                     "date": r[4].strftime("%d.%m.%Y %H:%M")} for r in rows]
         return {"statusCode": 200, "headers": cors, "body": json.dumps({"history": history})}
-
-    # POST action=verify
-    if action == "verify":
-        code = body.get("code", "").strip().upper()
-        if not code:
-            return {"statusCode": 400, "headers": cors, "body": json.dumps({"error": "no code"})}
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute(
-            f"SELECT tg_id, tg_username, tg_first_name FROM {SCHEMA}.tg_codes "
-            f"WHERE code = %s AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
-            (code,)
-        )
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            return {"statusCode": 400, "headers": cors, "body": json.dumps({"error": "invalid or expired code"})}
-        tg_id, tg_username, tg_first_name = row
-        name = tg_first_name or tg_username or f"Игрок_{str(tg_id)[-4:]}"
-        cur.execute(
-            f"INSERT INTO {SCHEMA}.users (tg_id, tg_username, tg_first_name, name) VALUES (%s, %s, %s, %s) "
-            f"ON CONFLICT (tg_id) DO UPDATE SET tg_username = EXCLUDED.tg_username, "
-            f"tg_first_name = EXCLUDED.tg_first_name, updated_at = NOW() RETURNING id, name, balance",
-            (tg_id, tg_username, tg_first_name, name)
-        )
-        user_row = cur.fetchone()
-        user_id, user_name, balance = user_row
-        new_token = secrets.token_urlsafe(32)
-        cur.execute(f"INSERT INTO {SCHEMA}.sessions (user_id, token) VALUES (%s, %s)", (user_id, new_token))
-        cur.execute(f"UPDATE {SCHEMA}.tg_codes SET expires_at = NOW() WHERE code = %s", (code,))
-        conn.commit()
-        conn.close()
-        return {"statusCode": 200, "headers": cors, "body": json.dumps({
-            "token": new_token,
-            "user": {"id": user_id, "tg_id": tg_id, "name": user_name, "tg_username": tg_username, "balance": float(balance)}
-        })}
 
     # POST action=balance
     if action == "balance":

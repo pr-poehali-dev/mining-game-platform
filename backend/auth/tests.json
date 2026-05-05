@@ -7,12 +7,12 @@
       "expectedStatus": 200
     },
     {
-      "name": "POST /verify with wrong code",
+      "name": "POST login with wrong credentials",
       "method": "POST",
-      "path": "/verify",
-      "body": {"code": "WRONGCODE"},
+      "path": "/",
+      "body": {"action": "login", "login": "nouser", "password": "wrongpass"},
       "expectedStatus": 400,
-      "expectedBody": {"error": "invalid or expired code"},
+      "expectedBody": {"error": "Неверный логин или пароль"},
       "bodyMatcher": "partial"
     }
   ]
