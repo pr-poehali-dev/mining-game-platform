@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import HomePage from "./game/HomePage";
 import MinerPage from "./game/MinerPage";
 import AviaryxPage from "./game/AviaryxPage";
@@ -7,7 +7,10 @@ import AdminPage from "./game/AdminPage";
 import ContactsPage from "./game/ContactsPage";
 import DepositPage from "./game/DepositPage";
 import WithdrawPage from "./game/WithdrawPage";
+import LoginPage from "./game/LoginPage";
 import Navbar from "./game/Navbar";
+import { getMe, updateBalance as apiUpdateBalance, addHistory as apiAddHistory, getHistory, clearToken, hasToken } from "@/lib/api";
+import type { UserProfile } from "@/lib/api";
 
 export type Page = "home" | "miner" | "aviaryx" | "profile" | "admin" | "contacts" | "deposit" | "withdraw";
 
@@ -25,56 +28,103 @@ export interface HistoryItem {
   date: string;
 }
 
-const initialUser: UserState = {
-  balance: 1250.00,
-  name: "Игрок_7724",
-  history: [
-    { id: 1, type: "deposit", label: "Пополнение", amount: 500, date: "05.05.2026 10:12" },
-    { id: 2, type: "game", label: "Минёр — победа", amount: 320, date: "05.05.2026 11:30" },
-    { id: 3, type: "game", label: "Авиарикс — вылет x2.4", amount: -200, date: "05.05.2026 12:05" },
-    { id: 4, type: "game", label: "Минёр — поражение", amount: -150, date: "05.05.2026 13:20" },
-    { id: 5, type: "deposit", label: "Пополнение", amount: 780, date: "05.05.2026 14:00" },
-  ],
-};
-
 export default function Index() {
   const [page, setPage] = useState<Page>("home");
-  const [user, setUser] = useState<UserState>(initialUser);
+  const [authUser, setAuthUser] = useState<UserProfile | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
 
-  const addHistory = (item: Omit<HistoryItem, "id">) => {
-    setUser(prev => ({
-      ...prev,
-      history: [{ ...item, id: Date.now() }, ...prev.history],
-    }));
+  useEffect(() => {
+    if (!hasToken()) { setAuthLoading(false); return; }
+    getMe().then(u => {
+      setAuthUser(u);
+      setAuthLoading(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!authUser) return;
+    getHistory().then(h => setHistory(h as HistoryItem[]));
+  }, [authUser]);
+
+  const handleLogin = (user: UserProfile) => {
+    setAuthUser(user);
+    getHistory().then(h => setHistory(h as HistoryItem[]));
   };
 
-  const updateBalance = (delta: number) => {
-    setUser(prev => ({ ...prev, balance: Math.max(0, prev.balance + delta) }));
+  const handleLogout = () => {
+    clearToken();
+    setAuthUser(null);
+    setHistory([]);
+    setPage("home");
   };
+
+  const addHistory = useCallback(async (item: Omit<HistoryItem, "id">) => {
+    const local: HistoryItem = { ...item, id: Date.now() };
+    setHistory(prev => [local, ...prev]);
+    await apiAddHistory({ type: item.type, label: item.label, amount: item.amount });
+  }, []);
+
+  const updateBalance = useCallback(async (delta: number) => {
+    if (!authUser) return;
+    setAuthUser(prev => prev ? { ...prev, balance: Math.max(0, prev.balance + delta) } : null);
+    const newBalance = await apiUpdateBalance(delta);
+    setAuthUser(prev => prev ? { ...prev, balance: newBalance } : null);
+  }, [authUser]);
 
   const navigate = (p: Page) => {
     setPage(p);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const userState: UserState = {
+    balance: authUser?.balance ?? 0,
+    name: authUser?.name ?? "",
+    history,
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center grid-bg">
+        <div className="text-center animate-pulse-neon">
+          <div className="font-display text-3xl mb-2" style={{ color: "#00f5d4" }}>
+            NEON<span style={{ color: "#bf00ff" }}>GAMES</span>
+          </div>
+          <div className="text-sm" style={{ color: "rgba(180,220,215,0.4)" }}>Загрузка...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return (
+      <div className="min-h-screen bg-background grid-bg relative">
+        <div className="scanlines fixed inset-0 z-0 pointer-events-none" />
+        <div className="relative z-10">
+          <LoginPage onLogin={handleLogin} />
+        </div>
+      </div>
+    );
+  }
+
   const renderPage = () => {
     switch (page) {
-      case "home": return <HomePage navigate={navigate} user={user} />;
-      case "miner": return <MinerPage user={user} updateBalance={updateBalance} addHistory={addHistory} />;
-      case "aviaryx": return <AviaryxPage user={user} updateBalance={updateBalance} addHistory={addHistory} />;
-      case "profile": return <ProfilePage user={user} navigate={navigate} />;
+      case "home": return <HomePage navigate={navigate} user={userState} />;
+      case "miner": return <MinerPage user={userState} updateBalance={updateBalance} addHistory={addHistory} />;
+      case "aviaryx": return <AviaryxPage user={userState} updateBalance={updateBalance} addHistory={addHistory} />;
+      case "profile": return <ProfilePage user={userState} navigate={navigate} onLogout={handleLogout} />;
       case "admin": return <AdminPage />;
       case "contacts": return <ContactsPage />;
-      case "deposit": return <DepositPage user={user} updateBalance={updateBalance} addHistory={addHistory} navigate={navigate} />;
-      case "withdraw": return <WithdrawPage user={user} updateBalance={updateBalance} addHistory={addHistory} navigate={navigate} />;
-      default: return <HomePage navigate={navigate} user={user} />;
+      case "deposit": return <DepositPage user={userState} updateBalance={updateBalance} addHistory={addHistory} navigate={navigate} />;
+      case "withdraw": return <WithdrawPage user={userState} updateBalance={updateBalance} addHistory={addHistory} navigate={navigate} />;
+      default: return <HomePage navigate={navigate} user={userState} />;
     }
   };
 
   return (
     <div className="min-h-screen bg-background grid-bg relative">
       <div className="scanlines fixed inset-0 z-0 pointer-events-none" />
-      <Navbar page={page} navigate={navigate} user={user} />
+      <Navbar page={page} navigate={navigate} user={userState} />
       <main className="pt-16 relative z-10">
         {renderPage()}
       </main>

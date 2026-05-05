@@ -1,0 +1,19 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "POST /verify with wrong code",
+      "method": "POST",
+      "path": "/verify",
+      "body": {"code": "WRONGCODE"},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "invalid or expired code"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

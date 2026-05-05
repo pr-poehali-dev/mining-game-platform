@@ -4,9 +4,10 @@ import Icon from "@/components/ui/icon";
 interface ProfileProps {
   user: UserState;
   navigate: (p: Page) => void;
+  onLogout?: () => void;
 }
 
-export default function ProfilePage({ user, navigate }: ProfileProps) {
+export default function ProfilePage({ user, navigate, onLogout }: ProfileProps) {
   const totalDeposit = user.history.filter(h => h.type === "deposit").reduce((s, h) => s + h.amount, 0);
   const totalWithdraw = user.history.filter(h => h.type === "withdraw").reduce((s, h) => s + Math.abs(h.amount), 0);
   const gamesPlayed = user.history.filter(h => h.type === "game").length;
@@ -82,6 +83,16 @@ export default function ProfilePage({ user, navigate }: ProfileProps) {
           </div>
         </button>
       </div>
+
+      {/* Logout */}
+      {onLogout && (
+        <button onClick={onLogout}
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium mb-5 transition-all hover:scale-[1.01] animate-fade-in"
+          style={{ background: "rgba(255,23,68,0.08)", border: "1px solid rgba(255,23,68,0.2)", color: "rgba(255,80,100,0.8)", animationDelay: "0.25s" }}>
+          <Icon name="LogOut" size={15} />
+          Выйти из аккаунта
+        </button>
+      )}
 
       {/* History */}
       <div className="card-neon rounded-2xl p-5 animate-fade-in" style={{ animationDelay: "0.3s" }}>
