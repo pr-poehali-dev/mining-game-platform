@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { Page, UserState, HistoryItem } from "../Index";
 import Icon from "@/components/ui/icon";
+import func2url from "../../../backend/func2url.json";
+
+const NOTIFY_URL = func2url["notify-telegram"];
 
 interface DepositProps {
   user: UserState;
@@ -33,10 +36,21 @@ export default function DepositPage({ user, updateBalance, addHistory, navigate 
     setStep("confirm");
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     updateBalance(amount);
     addHistory({ type: "deposit", label: `Пополнение ${selectedMethod.label}`, amount, date: now() });
     setStep("success");
+    fetch(NOTIFY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "deposit",
+        user: user.name,
+        amount,
+        method: selectedMethod.label,
+        phone,
+      }),
+    }).catch(() => {});
   };
 
   if (step === "success") {

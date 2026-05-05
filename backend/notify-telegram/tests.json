@@ -1,0 +1,26 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Send withdraw notification",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "type": "withdraw",
+        "user": "Тестовый_игрок",
+        "amount": 500,
+        "method": "Сбербанк",
+        "phone": "+7 (999) 000-00-00",
+        "extra": "Иван И."
+      },
+      "expectedStatus": 200,
+      "expectedBody": {"ok": true},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
