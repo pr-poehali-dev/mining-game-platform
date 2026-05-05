@@ -17,11 +17,14 @@ def handler(event: dict, context) -> dict:
     url = f"https://api.telegram.org/bot{bot_token}/setWebhook"
     payload = json.dumps({"url": webhook_url}).encode("utf-8")
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req) as resp:
-        result = json.loads(resp.read())
-
-    return {
-        "statusCode": 200,
-        "headers": cors,
-        "body": json.dumps(result)
-    }
+    try:
+        with urllib.request.urlopen(req) as resp:
+            result = json.loads(resp.read())
+        return {"statusCode": 200, "headers": cors, "body": json.dumps(result)}
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8")
+        return {
+            "statusCode": 200,
+            "headers": cors,
+            "body": json.dumps({"error": str(e), "detail": err_body, "token_preview": bot_token[:10] + "...", "webhook_url": webhook_url})
+        }
